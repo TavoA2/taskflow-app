@@ -20,11 +20,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
 
 	"github.com/TavoA2/taskflow-app/api/internal/config"
 	"github.com/TavoA2/taskflow-app/api/internal/httpapi"
 	"github.com/TavoA2/taskflow-app/api/internal/migrations"
+	"github.com/TavoA2/taskflow-app/api/internal/store"
 )
 
 // version is set at build time: -ldflags "-X main.version=<git sha>".
@@ -88,12 +90,23 @@ func migrate(cfg config.Config, logger *slog.Logger, action string) error {
 }
 
 func serve(cfg config.Config, logger *slog.Logger) error {
+	if cfg.DatabaseURL == "" {
+		return errors.New("DATABASE_URL is required for serve")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// The pool connects lazily: the server starts even if the database is still coming up.
+	// Pool size and timeouts can be tuned with DATABASE_URL parameters (e.g. pool_max_conns).
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("database pool: %w", err)
+	}
+	defer pool.Close()
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(logger),
+		Handler:           httpapi.NewRouter(logger, store.NewPostgres(pool)),
 		ReadHeaderTimeout: 5 * time.Second, // mitigates slow-header (Slowloris) clients
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
