@@ -6,7 +6,7 @@ VERSION   := $(shell git describe --always --dirty --abbrev=12 2>/dev/null || ec
 API_IMAGE := taskflow-api:$(VERSION)
 COMPOSE   := API_TAG=$(VERSION) docker compose
 
-.PHONY: help bootstrap fmt vet test api-image env up down ps logs migrate-status psql
+.PHONY: help bootstrap fmt vet test test-integration api-image env up down ps logs migrate-status psql
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -17,11 +17,14 @@ bootstrap: ## Verify workstation tools against .tool-versions (read-only)
 fmt: ## Fail if any Go file is not gofmt-formatted
 	@out="$$(gofmt -l api)"; if [[ -n "$$out" ]]; then echo "not gofmt-formatted:"; echo "$$out"; exit 1; fi
 
-vet: ## Run go vet static analysis
-	cd api && go vet ./...
+vet: ## Run go vet static analysis (including integration-tagged files)
+	cd api && go vet ./... && go vet -tags integration ./...
 
-test: ## Run unit tests
+test: ## Run unit tests (fast, no Docker)
 	cd api && go test -count=1 ./...
+
+test-integration: ## Run unit + integration tests against a real PostgreSQL container (needs Docker)
+	cd api && go test -tags integration -count=1 -timeout 5m ./...
 
 api-image: ## Build the API image tagged with the git SHA
 	docker build --build-arg VERSION=$(VERSION) -t $(API_IMAGE) api

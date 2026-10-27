@@ -40,7 +40,8 @@ Windows 11 + WSL2 (Ubuntu) + Docker Desktop with WSL integration. Work inside `~
 make help        # list targets
 make bootstrap   # verify the workstation; exit code 0 = READY
 make fmt vet     # formatting and static analysis
-make test        # unit tests
+make test        # unit tests (fast, no Docker)
+make test-integration  # unit + integration tests against a real PostgreSQL container (needs Docker)
 make api-image   # build taskflow-api:<git sha>[-dirty]
 ```
 
@@ -85,6 +86,25 @@ Every error has the same shape; internal errors never expose details (they are l
 ```
 
 Codes: `validation_failed`, `bad_request`, `not_found`, `internal`.
+
+## Testing
+
+| Level | Command | Scope | Needs |
+|-------|---------|-------|-------|
+| Unit | `make test` | Domain validation, HTTP handlers (in-memory fake store), middleware, probes, metrics | Go |
+| Integration | `make test-integration` | `store` and `migrations` against PostgreSQL (same image as compose) via testcontainers-go | Go + Docker |
+
+Integration tests carry the `integration` build tag, so `go test ./...` stays fast and Docker-free.
+`internal/testdb` starts one container per test package and creates a fresh database per test, so tests are
+isolated and run in parallel. Set `TEST_POSTGRES_IMAGE` to test against another PostgreSQL version.
+
+What the integration tests prove beyond the unit tests:
+
+- Migrations: schema and named CHECK constraints exist; `up` is idempotent; every migration rolls back and
+  re-applies; `up` blocks while another session holds the migration lock.
+- Store: partial updates keep untouched fields and advance `updated_at`; concurrent PATCHes of different fields
+  never lose a write (a read-modify-write implementation fails this test); database constraints reject invalid
+  data even when application validation is bypassed, counting characters the same way as the domain rules.
 
 ## Observability
 

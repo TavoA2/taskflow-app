@@ -5,3 +5,4 @@
 !cmd/
 !internal/
 **/*_test.go
+internal/testdb/
