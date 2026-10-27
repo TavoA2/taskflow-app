@@ -1,0 +1,69 @@
+# Rendered at container start by the image's envsubst step (only API_UPSTREAM and NGINX_LOCAL_RESOLVERS
+# are substituted, see NGINX_ENVSUBST_FILTER in the Dockerfile); nginx's own $variables are left intact.
+
+# Reuse the caller's X-Request-ID, or generate one, so a request can be followed from nginx into the API logs.
+map $http_x_request_id $req_id {
+    default $http_x_request_id;
+    ""      $request_id;
+}
+
+log_format json escape=json '{"time":"$time_iso8601","request_id":"$req_id","method":"$request_method",'
+    '"uri":"$uri","status":$status,"bytes":$body_bytes_sent,"duration_s":$request_time,'
+    '"upstream_status":"$upstream_status","upstream_duration_s":"$upstream_response_time"}';
+
+server {
+    listen 8080;
+    server_tokens off;
+    access_log /dev/stdout json;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Resolve the API name at request time (valid=10s) instead of once at start-up: nginx starts even if the
+    # API is not up yet, and follows the API to a new IP when its container or pod is replaced.
+    # The resolver does not apply DNS search domains, so in Kubernetes API_UPSTREAM must be a FQDN
+    # (http://api.<namespace>.svc.cluster.local:8080).
+    resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
+    set $api_upstream ${API_UPSTREAM};
+
+    # Security headers. The CSP allows only same-origin scripts, styles and API calls: no inline code, no CDNs.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Frame-Options "DENY" always;
+
+    # Container health check for nginx itself; does not touch the API.
+    location = /nginx-health {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Only /api/ is forwarded. The API's /healthz, /readyz and /metrics are deliberately not reachable from here.
+    location /api/ {
+        proxy_pass $api_upstream;   # variable without URI part: the original /api/... path is passed unchanged
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Request-ID $req_id;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 30s;
+        client_max_body_size 64k;   # matches the API's own request body limit
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-cache" always;
+        # add_header in a location replaces inherited ones, so the security headers are repeated here.
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header X-Frame-Options "DENY" always;
+    }
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}

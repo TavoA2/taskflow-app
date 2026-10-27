@@ -12,7 +12,7 @@ ADR-0001 for why the code and platform are split).
 | Component | Description | Status |
 |-----------|-------------|--------|
 | API | Go REST service: task CRUD, `/healthz`, `/readyz`, `/metrics` | Implemented + Tested (steps 1.1-1.4) |
-| Frontend | Static site served by nginx | Planned (Phase 1) |
+| Frontend | Static HTML/CSS/JS served by nginx (non-root), reverse proxy for `/api/` only | Implemented + Tested (step 1.6) |
 | Database | PostgreSQL 18 with goose migrations run as a one-shot `migrate` step | Implemented + Tested (step 1.2) |
 | App CI | Lint, test, build, Trivy scan + SBOM, push to GHCR tagged by commit SHA | Planned (Phase 2) |
 
@@ -21,7 +21,7 @@ ADR-0001 for why the code and platform are split).
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 0 | Repo skeleton, pinned tools, `make bootstrap` | Implemented, Tested (evidence: `taskflow-platform/docs/test-results/phase-0-workstation.md`) |
-| 1 | API + frontend + Postgres via docker compose, migrations, tests | Planned |
+| 1 | API + frontend + Postgres via docker compose, migrations, tests | In progress (steps 1.1-1.6 done; 1.7 smoke test and evidence pending) |
 | 2 | App CI pipeline | Planned |
 
 ## Prerequisites
@@ -48,17 +48,40 @@ make api-image   # build taskflow-api:<git sha>[-dirty]
 ## Local stack (docker compose)
 
 ```bash
-make up              # creates .env from .env.example if missing; postgres -> migrate -> api
+make up              # creates .env if missing; postgres -> migrate -> api -> frontend
 make ps              # `migrate` should show "Exited (0)"
 make migrate-status  # applied / pending migrations
 make psql            # SQL shell inside the postgres container
 make down            # stop; the pgdata volume (your data) is kept
 ```
 
-- The API listens on `127.0.0.1:8080` (`API_PORT` in `.env` to change). PostgreSQL is not published to the host.
+```mermaid
+flowchart LR
+  browser[Browser] -->|127.0.0.1:8080| fe[frontend: nginx]
+  fe -->|/api/* only| api[api :8080]
+  api --> db[(postgres)]
+  dev[Developer] -.->|127.0.0.1:8081 debug: /metrics, /readyz| api
+```
+
+- **App**: <http://127.0.0.1:8080> (`WEB_PORT`). **API debug port**: `127.0.0.1:8081` (`API_PORT`), for `/metrics`
+  and `/readyz`; the frontend never exposes those. PostgreSQL is not published to the host.
 - Migrations live in `api/internal/migrations/` and are embedded in the binary; `migrate` is the same
   image as `api` with a different command. A failed migration stops the stack before the API starts.
 - `docker compose down -v` **deletes the database volume**; use it only to reset local data deliberately.
+
+## Frontend
+
+Plain HTML/CSS/JavaScript in `frontend/public/` (no build step), served by `nginx-unprivileged` (UID 101).
+
+- User data is rendered with `textContent` only, never `innerHTML`; a strict Content-Security-Policy
+  (`script-src 'self'`, no inline code) blocks injected scripts as a second layer.
+- nginx proxies `/api/` to `API_UPSTREAM` and resolves that name per request (`resolver`, 10s cache), so it starts
+  without the API and follows it to a new address when the container or pod is replaced. In Kubernetes,
+  `API_UPSTREAM` must be a FQDN (`http://api.<namespace>.svc.cluster.local:8080`): the `resolver` directive does not
+  apply DNS search domains.
+- nginx forwards `X-Request-ID` (the caller's, or a generated one) to the API and logs it, so one ID links the edge
+  and API log lines. Error messages in the UI show it for support.
+- Request bodies above 64 KB are rejected at the edge (413), matching the API's own limit.
 
 ## API endpoints
 

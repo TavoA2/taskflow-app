@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaskFlow</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>TaskFlow</h1>
+    <p class="subtitle">Lab application for deployment, persistence and recovery exercises</p>
+  </header>
+
+  <main>
+    <section aria-labelledby="new-task-heading">
+      <h2 id="new-task-heading">New task</h2>
+      <form id="create-form" novalidate>
+        <label for="title">Title</label>
+        <input id="title" name="title" type="text" maxlength="200" required autocomplete="off">
+        <p class="field-error" data-field="title" role="alert"></p>
+
+        <label for="description">Description <span class="optional">(optional)</span></label>
+        <textarea id="description" name="description" maxlength="2000" rows="3"></textarea>
+        <p class="field-error" data-field="description" role="alert"></p>
+
+        <button type="submit">Add task</button>
+      </form>
+    </section>
+
+    <section aria-labelledby="tasks-heading">
+      <div class="list-header">
+        <h2 id="tasks-heading">Tasks</h2>
+        <button id="refresh" type="button" class="secondary">Refresh</button>
+      </div>
+      <div id="error" class="banner" role="alert" hidden></div>
+      <p id="empty" hidden>No tasks yet.</p>
+      <ul id="tasks"></ul>
+    </section>
+  </main>
+
+  <template id="task-template">
+    <li class="task">
+      <div class="task-main">
+        <span class="task-title"></span>
+        <p class="task-description"></p>
+      </div>
+      <div class="task-actions">
+        <label class="visually-hidden">Status</label>
+        <select class="task-status">
+          <option value="todo">To do</option>
+          <option value="in_progress">In progress</option>
+          <option value="done">Done</option>
+        </select>
+        <button type="button" class="task-delete danger">Delete</button>
+      </div>
+    </li>
+  </template>
+</body>
+</html>

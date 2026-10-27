@@ -1,5 +1,6 @@
 # Local development stack. Credentials come from .env (git-ignored; copy .env.example).
-# Start order: postgres (healthy) -> migrate (completed successfully) -> api.
+# Start order: postgres (healthy) -> migrate (completed successfully) -> api (healthy) -> frontend.
+# Browser -> frontend (nginx, :8080) -> /api/* -> api (:8080 in the network) -> postgres.
 
 name: taskflow
 
@@ -47,13 +48,28 @@ services:
     <<: *api-image
     command: ["serve"]
     ports:
-      - "127.0.0.1:${API_PORT:-8080}:8080"
+      # Published only for local debugging (/metrics, /readyz); users go through the frontend.
+      - "127.0.0.1:${API_PORT:-8081}:8080"
     # DRAIN_DELAY (5s) + SHUTDOWN_TIMEOUT (15s) must fit before Docker sends SIGKILL.
     stop_grace_period: 25s
     restart: unless-stopped
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+  frontend:
+    image: taskflow-frontend:${API_TAG:-dev}
+    build:
+      context: ./frontend
+    environment:
+      API_UPSTREAM: http://api:8080
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"
+    restart: unless-stopped
+    # Not required for nginx to start (it resolves the API per request); it only avoids 502s right after `up`.
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   pgdata:

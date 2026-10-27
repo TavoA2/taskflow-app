@@ -33,7 +33,7 @@ api-image: ## Build the API image tagged with the git SHA
 env: ## Create .env from .env.example if it does not exist
 	@if [[ -f .env ]]; then echo ".env exists, leaving it untouched"; else cp .env.example .env && echo "created .env from .env.example"; fi
 
-up: env ## Build and start the stack (postgres -> migrate -> api)
+up: env ## Build and start the stack (postgres -> migrate -> api -> frontend); app on http://127.0.0.1:8080
 	$(COMPOSE) up -d --build --wait
 
 down: ## Stop the stack; keeps the database volume
