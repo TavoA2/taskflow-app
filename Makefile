@@ -6,14 +6,18 @@ VERSION   := $(shell git describe --always --dirty --abbrev=12 2>/dev/null || ec
 API_IMAGE := taskflow-api:$(VERSION)
 COMPOSE   := API_TAG=$(VERSION) docker compose
 BASE_URL  ?= http://127.0.0.1:8080
+GITLEAKS_IMAGE := ghcr.io/gitleaks/gitleaks:v8.30.1
 
-.PHONY: help bootstrap fmt vet test test-integration api-image env up down ps logs migrate-status psql smoke persistence-test
+.PHONY: help bootstrap fmt vet test test-integration api-image env up down ps logs migrate-status psql smoke persistence-test secrets-scan
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 bootstrap: ## Verify workstation tools against .tool-versions (read-only)
 	@./scripts/bootstrap.sh
+
+secrets-scan: ## Scan the full git history for secrets with gitleaks (read-only mount)
+	docker run --rm -u $$(id -u):$$(id -g) -v "$(CURDIR)":/repo:ro $(GITLEAKS_IMAGE) git /repo --redact --no-banner
 
 fmt: ## Fail if any Go file is not gofmt-formatted
 	@out="$$(gofmt -l api)"; if [[ -n "$$out" ]]; then echo "not gofmt-formatted:"; echo "$$out"; exit 1; fi
