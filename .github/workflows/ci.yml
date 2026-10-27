@@ -1,6 +1,7 @@
 # Application CI: static checks, tests, image build, vulnerability gate and SBOM on every pull request
-# and on every push to main. Each step calls a Makefile target, so any failure reproduces locally with
-# the same command. Publishing to GHCR is added in a later step of Phase 2.
+# and on every push to main. Each check calls a Makefile target, so any failure reproduces locally with
+# the same command. On main only, the scanned images are published to GHCR (tagged by commit SHA, never
+# `latest`) with signed build provenance and SBOM attestations.
 name: ci
 
 on:
@@ -98,3 +99,78 @@ jobs:
           path: build/*.cdx.json
           if-no-files-found: error
           retention-days: 30
+      # Main only: hand the exact images that passed the gate to the publish job. Rebuilding there
+      # would publish bytes that never went through the CVE gate.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: images-${{ github.sha }}
+          path: build/*.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: publish (${{ matrix.image }})
+    # Pushes to main only, after every gate passed. Pull requests never get these write permissions.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-scan]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        image: [api, frontend]
+    permissions:
+      contents: read
+      packages: write          # push to ghcr.io
+      id-token: write          # OIDC token for keyless (Sigstore) signing of the attestations
+      attestations: write      # store the attestations in GitHub
+      artifact-metadata: write # storage record linking each attestation to the package
+    env:
+      IMAGE: ghcr.io/tavoa2/taskflow-${{ matrix.image }} # GHCR requires a lowercase owner
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: images-${{ github.sha }}
+          path: build
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sbom-${{ github.sha }}
+          path: build
+      # Values from the event go through env vars, never interpolated into the script (injection-safe).
+      - name: Load, check revision, tag by commit SHA and push
+        id: push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          SHA: ${{ github.sha }}
+          NAME: ${{ matrix.image }}
+        run: |
+          local_ref=$(docker load -i "build/$NAME.tar" | sed -n 's/^Loaded image: //p')
+          revision=$(docker image inspect "$local_ref" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')
+          if [ "$revision" != "$SHA" ]; then
+            echo "::error::image label revision=$revision does not match commit $SHA"; exit 1
+          fi
+          docker tag "$local_ref" "$IMAGE:$SHA"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          docker push --quiet "$IMAGE:$SHA"
+          digest=$(docker image inspect "$IMAGE:$SHA" --format '{{ range .RepoDigests }}{{ println . }}{{ end }}' | grep "^$IMAGE@" | cut -d@ -f2)
+          [ -n "$digest" ] || { echo "::error::no registry digest for $IMAGE:$SHA"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          { echo "### \`$IMAGE:$SHA\`"; echo "digest: \`$digest\`"; } >> "$GITHUB_STEP_SUMMARY"
+      # No sbom-path or predicate: generates SLSA build provenance (repo, commit, workflow, runner).
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - name: Attest SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: build/${{ matrix.image }}.cdx.json
+          push-to-registry: true
+      - name: Log out of GHCR
+        if: ${{ always() }}
+        run: docker logout ghcr.io

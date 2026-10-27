@@ -16,7 +16,7 @@ ADR-0001 for why the code and platform are split).
 | API | Go REST service: task CRUD, `/healthz`, `/readyz`, `/metrics` | Implemented + Tested (steps 1.1-1.4) |
 | Frontend | Static HTML/CSS/JS served by nginx (non-root), reverse proxy for `/api/` only | Implemented + Tested (step 1.6) |
 | Database | PostgreSQL 18 with goose migrations run as a one-shot `migrate` step | Implemented + Tested (step 1.2) |
-| App CI | Lint, test, build, Trivy scan + SBOM, push to GHCR tagged by commit SHA | Lint, tests (2.3), build, CVE gate, SBOM (2.4): Implemented; publish: Planned |
+| App CI | Lint, test, build, Trivy scan + SBOM, push to GHCR tagged by commit SHA | Lint, tests (2.3), build, CVE gate, SBOM (2.4), publish with attestations (2.5): Implemented |
 
 ## Status
 
@@ -119,6 +119,24 @@ Every error has the same shape; internal errors never expose details (they are l
 ```
 
 Codes: `validation_failed`, `bad_request`, `not_found`, `internal`.
+
+## Published images
+
+Every push to `main` that passes all CI gates publishes the scanned images (not a rebuild) to GHCR,
+tagged with the full commit SHA. There is no `latest` tag.
+
+| Image | Reference |
+|-------|-----------|
+| API | `ghcr.io/tavoa2/taskflow-api:<commit-sha>` |
+| Frontend | `ghcr.io/tavoa2/taskflow-frontend:<commit-sha>` |
+
+Each image carries OCI labels (`org.opencontainers.image.revision` = commit, `source` = this repository) and
+two signed attestations stored in GitHub and in the registry: SLSA build provenance and the CycloneDX SBOM.
+Verify that an image was built by this repository's CI from a given commit:
+
+```bash
+gh attestation verify oci://ghcr.io/tavoa2/taskflow-api:<commit-sha> --owner TavoA2
+```
 
 ## Testing
 
