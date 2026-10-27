@@ -7,6 +7,15 @@ API_IMAGE      := taskflow-api:$(VERSION)
 FRONTEND_IMAGE := taskflow-frontend:$(VERSION)
 COMPOSE   := API_TAG=$(VERSION) docker compose
 BUILD_DIR := build
+# Standard OCI labels: "source" links the GHCR package to this repository; "revision" records the exact
+# commit. "created" is the commit time (not the build time) so the label is reproducible per commit.
+# url/version/description are set explicitly: otherwise the frontend inherits the nginx base image's.
+OCI_LABELS := --label org.opencontainers.image.source=https://github.com/TavoA2/taskflow-app \
+              --label org.opencontainers.image.url=https://github.com/TavoA2/taskflow-app \
+              --label org.opencontainers.image.revision=$(shell git rev-parse HEAD 2>/dev/null) \
+              --label org.opencontainers.image.version=$(VERSION) \
+              --label org.opencontainers.image.created=$(shell git log -1 --format=%cI 2>/dev/null) \
+              --label org.opencontainers.image.licenses=MIT
 BASE_URL  ?= http://127.0.0.1:8080
 # Linters run from pinned container images, so local runs and CI use exactly the same versions.
 GITLEAKS_IMAGE   := ghcr.io/gitleaks/gitleaks:v8.30.1
@@ -64,8 +73,10 @@ test-race: ## Unit + integration tests with the race detector (needs Docker and 
 	cd api && CGO_ENABLED=1 go test -race -tags integration -count=1 -timeout 10m ./...
 
 images: ## Build the API and frontend images tagged with the git SHA
-	docker build --build-arg VERSION=$(VERSION) -t $(API_IMAGE) api
-	docker build -t $(FRONTEND_IMAGE) frontend
+	docker build --build-arg VERSION=$(VERSION) $(OCI_LABELS) --label org.opencontainers.image.title=taskflow-api \
+	  --label "org.opencontainers.image.description=TaskFlow REST API (Go)" -t $(API_IMAGE) api
+	docker build $(OCI_LABELS) --label org.opencontainers.image.title=taskflow-frontend \
+	  --label "org.opencontainers.image.description=TaskFlow web UI served by nginx" -t $(FRONTEND_IMAGE) frontend
 
 vulncheck: ## govulncheck: known Go vulnerabilities in code paths the API actually calls
 	cd api && go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
