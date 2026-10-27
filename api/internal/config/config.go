@@ -12,7 +12,9 @@ import (
 type Config struct {
 	// HTTPAddr is the listen address, e.g. ":8080".
 	HTTPAddr string
-	LogLevel slog.Level
+	// DatabaseURL is a PostgreSQL connection URL. It contains credentials: never log it.
+	DatabaseURL string
+	LogLevel    slog.Level
 	// DrainDelay is how long the server keeps serving after SIGTERM, so load balancers
 	// and Kubernetes endpoints stop routing to this instance before connections close.
 	DrainDelay time.Duration
@@ -26,7 +28,10 @@ func Load() (Config, error) {
 }
 
 func load(getenv func(string) string) (Config, error) {
-	cfg := Config{HTTPAddr: valueOr(getenv("HTTP_ADDR"), ":8080")}
+	cfg := Config{
+		HTTPAddr:    valueOr(getenv("HTTP_ADDR"), ":8080"),
+		DatabaseURL: getenv("DATABASE_URL"),
+	}
 
 	if err := cfg.LogLevel.UnmarshalText([]byte(valueOr(getenv("LOG_LEVEL"), "info"))); err != nil {
 		return Config{}, fmt.Errorf("LOG_LEVEL: %w", err)

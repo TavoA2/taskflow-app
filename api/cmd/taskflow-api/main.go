@@ -2,12 +2,14 @@
 //
 // Usage:
 //
-//	taskflow-api [serve]     start the HTTP server (default)
-//	taskflow-api healthcheck exit 0 if the local server answers /healthz (for distroless images)
+//	taskflow-api [serve]                    start the HTTP server (default)
+//	taskflow-api migrate [up|status|down]   apply or inspect schema migrations (needs DATABASE_URL)
+//	taskflow-api healthcheck                exit 0 if the local server answers /healthz (for distroless images)
 package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,8 +20,11 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
+
 	"github.com/TavoA2/taskflow-app/api/internal/config"
 	"github.com/TavoA2/taskflow-app/api/internal/httpapi"
+	"github.com/TavoA2/taskflow-app/api/internal/migrations"
 )
 
 // version is set at build time: -ldflags "-X main.version=<git sha>".
@@ -48,11 +53,38 @@ func run(args []string) error {
 	switch cmd {
 	case "serve":
 		return serve(cfg, logger)
+	case "migrate":
+		action := "up"
+		if len(args) > 1 {
+			action = args[1]
+		}
+		return migrate(cfg, logger, action)
 	case "healthcheck":
 		return healthcheck(cfg)
 	default:
-		return fmt.Errorf("unknown command %q (want serve or healthcheck)", cmd)
+		return fmt.Errorf("unknown command %q (want serve, migrate or healthcheck)", cmd)
 	}
+}
+
+func migrate(cfg config.Config, logger *slog.Logger, action string) error {
+	if cfg.DatabaseURL == "" {
+		return errors.New("DATABASE_URL is required for migrate")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	db, err := sql.Open("pgx", cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	defer db.Close()
+
+	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := db.PingContext(pingCtx); err != nil {
+		return fmt.Errorf("connect to database: %w", err)
+	}
+	return migrations.Run(ctx, db, action, logger.With("component", "migrate"))
 }
 
 func serve(cfg config.Config, logger *slog.Logger) error {

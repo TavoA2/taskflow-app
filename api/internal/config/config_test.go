@@ -24,6 +24,7 @@ func TestLoadDefaults(t *testing.T) {
 func TestLoadOverrides(t *testing.T) {
 	cfg, err := load(envFrom(map[string]string{
 		"HTTP_ADDR":        ":9090",
+		"DATABASE_URL":     "postgres://u:p@db:5432/x",
 		"LOG_LEVEL":        "debug",
 		"DRAIN_DELAY":      "0s",
 		"SHUTDOWN_TIMEOUT": "2s",
@@ -31,7 +32,7 @@ func TestLoadOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := Config{HTTPAddr: ":9090", LogLevel: slog.LevelDebug, DrainDelay: 0, ShutdownTimeout: 2 * time.Second}
+	want := Config{HTTPAddr: ":9090", DatabaseURL: "postgres://u:p@db:5432/x", LogLevel: slog.LevelDebug, DrainDelay: 0, ShutdownTimeout: 2 * time.Second}
 	if cfg != want {
 		t.Errorf("got %+v, want %+v", cfg, want)
 	}

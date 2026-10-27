@@ -1,0 +1,56 @@
+# Local development stack. Credentials come from .env (git-ignored; copy .env.example).
+# Start order: postgres (healthy) -> migrate (completed successfully) -> api.
+
+name: taskflow
+
+x-api-image: &api-image
+  # Same image for the service and its migrations (ADR-0004). Built locally, tagged by git SHA.
+  image: taskflow-api:${API_TAG:-dev}
+  build:
+    context: ./api
+    args:
+      VERSION: ${API_TAG:-dev}
+  environment:
+    DATABASE_URL: postgres://${POSTGRES_USER:?set in .env}:${POSTGRES_PASSWORD:?set in .env}@postgres:5432/${POSTGRES_DB:?set in .env}?sslmode=disable
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+
+services:
+  postgres:
+    image: postgres:18.6-alpine3.24
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set in .env}
+    volumes:
+      # PostgreSQL 18 images keep data under /var/lib/postgresql/18/docker; mount the parent.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    # No published port: only services on the compose network reach the database.
+
+  migrate:
+    <<: *api-image
+    command: ["migrate", "up"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *api-image
+    command: ["serve"]
+    ports:
+      - "127.0.0.1:${API_PORT:-8080}:8080"
+    # DRAIN_DELAY (5s) + SHUTDOWN_TIMEOUT (15s) must fit before Docker sends SIGKILL.
+    stop_grace_period: 25s
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
