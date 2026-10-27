@@ -88,10 +88,13 @@ jobs:
       - name: SBOM (CycloneDX)
         if: ${{ !cancelled() }}
         run: make sbom
+      # On pull_request events github.sha is GitHub's temporary merge commit (PR branch + main), which
+      # exists in no branch; name the artifact after the PR head commit so it maps to real history.
+      # The images themselves are built from that merge commit: what main would contain after merging.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
-          name: sbom-${{ github.sha }}
+          name: sbom-${{ github.event.pull_request.head.sha || github.sha }}
           path: build/*.cdx.json
           if-no-files-found: error
           retention-days: 30
