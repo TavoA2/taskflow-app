@@ -1,5 +1,5 @@
 # Static frontend served by nginx as a non-root user (UID 101, port 8080).
-FROM nginxinc/nginx-unprivileged:1.30.6-alpine3.24
+FROM nginxinc/nginx-unprivileged:1.25.3-alpine
 
 # API_UPSTREAM: where /api/ is proxied to; overridden per environment (compose service name, Kubernetes FQDN).
 # NGINX_ENTRYPOINT_LOCAL_RESOLVERS: export the container's DNS servers as NGINX_LOCAL_RESOLVERS for `resolver`.
