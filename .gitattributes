@@ -1,0 +1,6 @@
+# Normalize line endings to LF in the repo regardless of the OS that commits
+# (this repo is edited from Windows + WSL; CRLF breaks shell scripts and Makefiles).
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary

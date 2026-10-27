@@ -1,0 +1,21 @@
+# --- Go build and test output ---
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.*
+go.work
+go.work.sum
+
+# --- Local configuration / secrets (never commit) ---
+.env
+.env.*
+!.env.example
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
