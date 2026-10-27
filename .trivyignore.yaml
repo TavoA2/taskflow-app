@@ -1,0 +1,10 @@
+# Exceptions to the CVE gate (`make scan`). Policy (ADR, Phase 2):
+#   - The gate fails on CRITICAL vulnerabilities that have a fixed version available.
+#   - An exception is allowed only with a reason and an expiry date; after `expired_at` the gate fails again,
+#     forcing a new review instead of a silent permanent ignore.
+# Format:
+#   vulnerabilities:
+#     - id: CVE-YYYY-NNNNN
+#       statement: why it does not apply or why it cannot be fixed yet (link to the issue)
+#       expired_at: YYYY-MM-DD
+vulnerabilities: []

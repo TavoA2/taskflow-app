@@ -3,8 +3,10 @@ SHELL := /bin/bash
 
 # Image tag = git commit SHA (never `latest`); "-dirty" marks builds with uncommitted changes.
 VERSION   := $(shell git describe --always --dirty --abbrev=12 2>/dev/null || echo dev)
-API_IMAGE := taskflow-api:$(VERSION)
+API_IMAGE      := taskflow-api:$(VERSION)
+FRONTEND_IMAGE := taskflow-frontend:$(VERSION)
 COMPOSE   := API_TAG=$(VERSION) docker compose
+BUILD_DIR := build
 BASE_URL  ?= http://127.0.0.1:8080
 # Linters run from pinned container images, so local runs and CI use exactly the same versions.
 GITLEAKS_IMAGE   := ghcr.io/gitleaks/gitleaks:v8.30.1
@@ -12,6 +14,15 @@ GOLANGCI_IMAGE   := golangci/golangci-lint:v2.15.0
 HADOLINT_IMAGE   := hadolint/hadolint:v2.15.1
 SHELLCHECK_IMAGE := koalaman/shellcheck:v0.11.0
 ACTIONLINT_IMAGE := rhysd/actionlint:1.7.12
+# The scanner sees every layer of our images: pinned by digest too (a tag can be re-pointed, a digest cannot).
+TRIVY_IMAGE      := aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+GOVULNCHECK_VERSION := v1.9.0
+# Trivy vulnerability DB cache, kept between runs (CI restores it with actions/cache).
+TRIVY_CACHE ?= $(HOME)/.cache/trivy
+# Images are scanned from `docker save` archives, so the scanner never gets the Docker socket
+# (access to the socket is equivalent to root on the host).
+TRIVY := docker run --rm -u $$(id -u):$$(id -g) -e HOME=/tmp -v "$(TRIVY_CACHE)":/cache \
+         -v "$(CURDIR)":/src:ro -v "$(CURDIR)/$(BUILD_DIR)":/build $(TRIVY_IMAGE) --cache-dir /cache
 # Reuse the host Go module and build caches inside the linter container (no re-download every run).
 # GOPATH must be writable by the non-root user so Go can fetch the exact toolchain in go.mod (and its
 # checksum database entries) when the image's Go is older. The module cache is mounted outside GOPATH:
@@ -20,7 +31,7 @@ GO_CACHES := -e GOPATH=/tmp/gopath -e GOMODCACHE=/tmp/gomodcache -v "$$(go env G
              -e GOCACHE=/tmp/gocache -v "$$(go env GOCACHE)":/tmp/gocache \
              -e GOLANGCI_LINT_CACHE=/tmp/gocache/golangci-lint -e HOME=/tmp
 
-.PHONY: help bootstrap fmt vet lint test test-race test-integration api-image env up down ps logs migrate-status psql smoke persistence-test secrets-scan
+.PHONY: help bootstrap fmt vet lint test test-race test-integration images image-archives vulncheck scan sbom env up down ps logs migrate-status psql smoke persistence-test secrets-scan
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -52,9 +63,34 @@ test-integration: ## Run unit + integration tests against a real PostgreSQL cont
 test-race: ## Unit + integration tests with the race detector (needs Docker and a C compiler, e.g. gcc)
 	cd api && CGO_ENABLED=1 go test -race -tags integration -count=1 -timeout 10m ./...
 
-api-image: ## Build the API image tagged with the git SHA
+images: ## Build the API and frontend images tagged with the git SHA
 	docker build --build-arg VERSION=$(VERSION) -t $(API_IMAGE) api
-	@docker image ls $(API_IMAGE) --format 'built {{.Repository}}:{{.Tag}} ({{.Size}})'
+	docker build -t $(FRONTEND_IMAGE) frontend
+
+vulncheck: ## govulncheck: known Go vulnerabilities in code paths the API actually calls
+	cd api && go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
+
+image-archives: # (internal) export the built images for the scanner
+	@mkdir -p $(BUILD_DIR) "$(TRIVY_CACHE)"
+	docker save -o $(BUILD_DIR)/api.tar $(API_IMAGE)
+	docker save -o $(BUILD_DIR)/frontend.tar $(FRONTEND_IMAGE)
+
+scan: image-archives ## Trivy: report HIGH+CRITICAL, then the CVE gate (fail on CRITICAL with a fix available)
+	@for img in api frontend; do \
+	  echo "=== $$img: HIGH and CRITICAL (report only)"; \
+	  $(TRIVY) image --input /build/$$img.tar --scanners vuln --severity HIGH,CRITICAL --exit-code 0 --no-progress || exit 1; \
+	done
+	@status=0; for img in api frontend; do \
+	  echo "=== $$img: CVE gate (CRITICAL with a fix available, minus .trivyignore.yaml exceptions)"; \
+	  $(TRIVY) image --input /build/$$img.tar --scanners vuln --severity CRITICAL --ignore-unfixed \
+	    --ignorefile /src/.trivyignore.yaml --skip-db-update --exit-code 1 --no-progress || status=1; \
+	done; exit $$status
+
+sbom: image-archives ## CycloneDX SBOM of each image, written to build/<image>.cdx.json
+	@for img in api frontend; do \
+	  $(TRIVY) image --input /build/$$img.tar --format cyclonedx --output /build/$$img.cdx.json --no-progress || exit 1; \
+	  echo "build/$$img.cdx.json: $$(jq '.components | length' $(BUILD_DIR)/$$img.cdx.json) components"; \
+	done
 
 env: ## Create .env from .env.example if it does not exist
 	@if [[ -f .env ]]; then echo ".env exists, leaving it untouched"; else cp .env.example .env && echo "created .env from .env.example"; fi
