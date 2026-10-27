@@ -11,7 +11,7 @@ ADR-0001 for why the code and platform are split).
 
 | Component | Description | Status |
 |-----------|-------------|--------|
-| API | Go REST service: task CRUD, `/healthz`, `/readyz`, `/metrics` | CRUD, `/healthz`, graceful shutdown, image: Implemented + Tested (steps 1.1-1.3). `/readyz`, `/metrics`: Planned (1.4) |
+| API | Go REST service: task CRUD, `/healthz`, `/readyz`, `/metrics` | Implemented + Tested (steps 1.1-1.4) |
 | Frontend | Static site served by nginx | Planned (Phase 1) |
 | Database | PostgreSQL 18 with goose migrations run as a one-shot `migrate` step | Implemented + Tested (step 1.2) |
 | App CI | Lint, test, build, Trivy scan + SBOM, push to GHCR tagged by commit SHA | Planned (Phase 2) |
@@ -69,6 +69,11 @@ make down            # stop; the pgdata volume (your data) is kept
 | `PATCH /api/v1/tasks/{id}` (any subset of fields) | 200 | 400, 404 |
 | `DELETE /api/v1/tasks/{id}` | 204 | 400, 404 |
 | `GET /healthz` | 200 (liveness; never checks the database) | |
+| `GET /readyz` | 200 `{"status":"ready"}` | 503 `unavailable` (database ping failed, 1s timeout) or `shutting_down` (after SIGTERM) |
+| `GET /metrics` | Prometheus text format | |
+
+`/healthz`, `/readyz` and `/metrics` are outside `/api/`, so the frontend proxy (which forwards only
+`/api/`) does not expose them publicly.
 
 Rules: `title` 1-200 characters (trimmed), `description` up to 2000, `status` one of `todo`, `in_progress`, `done`
 (default `todo`). Unknown JSON fields are rejected. A JSON `null` in a PATCH is treated as "not provided".
@@ -80,6 +85,31 @@ Every error has the same shape; internal errors never expose details (they are l
 ```
 
 Codes: `validation_failed`, `bad_request`, `not_found`, `internal`.
+
+## Observability
+
+**Metrics** (`/metrics`):
+
+| Metric | Type | Labels | Purpose |
+|--------|------|--------|---------|
+| `http_requests_total` | counter | `method`, `route`, `code` | Rate and errors (RED) |
+| `http_request_duration_seconds` | histogram | `method`, `route` | Latency (RED) |
+| `http_requests_in_flight` | gauge | | Concurrency |
+| `taskflow_db_pool_{acquired,idle,total,max}_conns` | gauge | | Pool utilization (USE) |
+| `taskflow_db_pool_empty_acquires_total`, `..._empty_acquire_wait_seconds_total` | counter | | Pool saturation: requests that waited for a connection |
+| `taskflow_build_info` | gauge | `version`, `goversion` | Which build is running |
+| `go_*`, `process_*` | various | | Runtime and process |
+
+Label values are bounded: `route` is the matched pattern (`/api/v1/tasks/{id}`, or `unmatched`), never the raw
+path; unknown HTTP methods become `OTHER`.
+
+**Logs**: JSON to stdout, one `http request` line per request with `request_id`, `method`, `route`, `path`,
+`status`, `duration_ms`, `bytes`. Probe and scrape requests log at debug level. The query string is not logged.
+`X-Request-ID` is accepted from the caller if safe (≤64 chars, `[A-Za-z0-9._-]`), otherwise generated, and
+always returned in the response; error logs carry the same ID.
+
+**Shutdown sequence** on SIGTERM: `/readyz` returns 503 → keep serving for `DRAIN_DELAY` → stop accepting,
+finish in-flight requests within `SHUTDOWN_TIMEOUT` → close the database pool.
 
 ## API configuration
 

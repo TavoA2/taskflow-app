@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -21,9 +19,7 @@ type apiClient struct {
 
 func newAPI(t *testing.T, store TaskStore) *apiClient {
 	t.Helper()
-	srv := httptest.NewServer(NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), store))
-	t.Cleanup(srv.Close)
-	return &apiClient{t: t, url: srv.URL}
+	return &apiClient{t: t, url: newTestServer(t, testDeps(store)).URL}
 }
 
 // do sends a request and decodes a JSON response body into out (if non-nil).

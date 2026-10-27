@@ -25,7 +25,10 @@ services:
       # PostgreSQL 18 images keep data under /var/lib/postgresql/18/docker; mount the parent.
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      # Check over TCP, not the Unix socket: on first boot the image runs a temporary init server
+      # that listens on the socket only (listen_addresses=''), then stops it. A socket check can
+      # report that short-lived server as healthy and let `migrate` start against a stopping database.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 3s
       retries: 10

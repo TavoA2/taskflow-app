@@ -148,7 +148,7 @@ func (h *taskHandlers) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, task.ErrNotFound):
 		writeJSON(w, h.logger, http.StatusNotFound, errorBody{Error: "task not found", Code: "not_found"})
 	default:
-		h.logger.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
+		h.logger.Error("request failed", "request_id", RequestID(r.Context()), "method", r.Method, "path", r.URL.Path, "err", err)
 		writeJSON(w, h.logger, http.StatusInternalServerError, errorBody{Error: "internal error", Code: "internal"})
 	}
 }

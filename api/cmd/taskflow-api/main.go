@@ -17,11 +17,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 
 	"github.com/TavoA2/taskflow-app/api/internal/config"
 	"github.com/TavoA2/taskflow-app/api/internal/httpapi"
@@ -81,12 +84,36 @@ func migrate(cfg config.Config, logger *slog.Logger, action string) error {
 	}
 	defer db.Close()
 
-	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if err := db.PingContext(pingCtx); err != nil {
-		return fmt.Errorf("connect to database: %w", err)
+	logger = logger.With("component", "migrate")
+	if err := waitForDB(ctx, db, logger, 30*time.Second); err != nil {
+		return err
 	}
-	return migrations.Run(ctx, db, action, logger.With("component", "migrate"))
+	return migrations.Run(ctx, db, action, logger)
+}
+
+// waitForDB retries the first connection for up to timeout. A database that is still starting
+// (compose cold start, or a Kubernetes Job scheduled next to a new Postgres pod) is expected,
+// not fatal; a database that never comes up still fails the step clearly.
+func waitForDB(ctx context.Context, db *sql.DB, logger *slog.Logger, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for attempt := 1; ; attempt++ {
+		pingCtx, pingCancel := context.WithTimeout(ctx, 3*time.Second)
+		err := db.PingContext(pingCtx)
+		pingCancel()
+		if err == nil {
+			if attempt > 1 {
+				logger.Info("database reachable", "attempts", attempt)
+			}
+			return nil
+		}
+		logger.Warn("database not reachable yet, retrying", "attempt", attempt, "err", err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("database not reachable after %s: %w", timeout, err)
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 func serve(cfg config.Config, logger *slog.Logger) error {
@@ -104,9 +131,30 @@ func serve(cfg config.Config, logger *slog.Logger) error {
 	}
 	defer pool.Close()
 
+	// A dedicated registry (not the global default) exposes exactly what is registered here.
+	reg := prometheus.NewRegistry()
+	buildInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "taskflow_build_info",
+		Help: "Always 1; labels identify the running build.",
+	}, []string{"version", "goversion"})
+	buildInfo.WithLabelValues(version, runtime.Version()).Set(1)
+	reg.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		store.NewPoolCollector(pool),
+		buildInfo,
+	)
+	readiness := httpapi.NewReadiness(pool, logger)
+
 	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(logger, store.NewPostgres(pool)),
+		Addr: cfg.HTTPAddr,
+		Handler: httpapi.NewRouter(httpapi.Deps{
+			Logger:    logger,
+			Store:     store.NewPostgres(pool),
+			Readiness: readiness,
+			Metrics:   httpapi.NewMetrics(reg),
+			Gatherer:  reg,
+		}),
 		ReadHeaderTimeout: 5 * time.Second, // mitigates slow-header (Slowloris) clients
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -131,6 +179,8 @@ func serve(cfg config.Config, logger *slog.Logger) error {
 
 	// Keep serving while Kubernetes removes this pod from Service endpoints; that removal runs
 	// concurrently with SIGTERM, so closing at once would drop requests still being routed here.
+	// /readyz fails from now on, which also takes the pod out of rotation where SIGTERM alone does not.
+	readiness.StartShutdown()
 	logger.Info("shutdown signal received, draining", "drain_delay", cfg.DrainDelay.String())
 	time.Sleep(cfg.DrainDelay)
 
