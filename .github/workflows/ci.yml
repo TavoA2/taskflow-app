@@ -117,6 +117,9 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     strategy:
+      # Each image must finish push + both attestations on its own. With fail-fast, one image failing
+      # cancels the other mid-run, which can leave a pushed image without attestations.
+      fail-fast: false
       matrix:
         image: [api, frontend]
     permissions:
