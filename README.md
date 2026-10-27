@@ -138,6 +138,18 @@ Verify that an image was built by this repository's CI from a given commit:
 gh attestation verify oci://ghcr.io/tavoa2/taskflow-api:<commit-sha> --owner TavoA2
 ```
 
+## Dependency updates and branch protection
+
+- **Dependabot** (`.github/dependabot.yml`) opens weekly PRs for Go modules, base images (pinned as
+  `tag@digest`), the compose PostgreSQL image and GitHub Actions (pinned to commit SHAs). Minor and patch
+  updates are grouped per ecosystem. Its PRs go through the same CI gates. Not covered: linter and scanner
+  versions in the `Makefile` and the test PostgreSQL constant; `make lint` fails if that constant drifts
+  from `compose.yaml`.
+- **Ruleset on `main`** (`.github/rulesets/main.json`, applied with `make ruleset`, drift check with
+  `make ruleset-check`): changes only through pull requests, squash merges only, required checks `lint`,
+  `test` and `build and scan` from GitHub Actions, branch up to date before merge, no force push or deletion,
+  no bypass.
+
 ## Testing
 
 | Level | Command | Scope | Needs |

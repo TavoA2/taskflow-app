@@ -1,0 +1,56 @@
+# Dependabot: weekly version updates. Minor and patch updates are grouped into one PR per ecosystem;
+# major updates arrive one PR each (they are the ones that tend to break things and need review).
+# Every Dependabot PR goes through the same CI gates as any other PR before it can be merged.
+#
+# Not covered (reviewed manually, see the Phase 2 ADR): linter and scanner image versions in the
+# Makefile, govulncheck's version, and the PostgreSQL image constant in api/internal/testdb/testdb.go
+# (`make lint` fails if that constant drifts from compose.yaml).
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /api
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      go-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Base images are pinned as tag@digest: Dependabot updates both, including digest-only rebuilds of
+  # the same tag (how base images ship OS security fixes).
+  - package-ecosystem: docker
+    directories: [/api, /frontend]
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      base-images-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: build
+      include: scope
+
+  # Actions are pinned to commit SHAs with a "# vX.Y.Z" comment; Dependabot updates both.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]

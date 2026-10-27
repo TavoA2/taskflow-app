@@ -28,7 +28,7 @@ import (
 )
 
 // defaultImage must match the postgres image in compose.yaml, so tests run against the same version.
-const defaultImage = "postgres:18.6-alpine3.24"
+const defaultImage = "postgres:18.6-alpine3.24@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5"
 
 var adminURL string
 
