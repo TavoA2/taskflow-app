@@ -14,7 +14,7 @@ import (
 func readyz(t *testing.T, rd *Readiness) (int, readyBody, string) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	rd.ServeHTTP(rec, httptest.NewRequest("GET", "/readyz", nil))
+	rd.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	var body readyBody
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode %q: %v", rec.Body.String(), err)

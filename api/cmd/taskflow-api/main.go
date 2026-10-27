@@ -198,8 +198,13 @@ func healthcheck(cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("HTTP_ADDR %q: %w", cfg.HTTPAddr, err)
 	}
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://127.0.0.1:" + port + "/healthz")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1:"+port+"/healthz", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}

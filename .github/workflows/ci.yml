@@ -1,0 +1,55 @@
+# Application CI: static checks and tests on every pull request and on every push to main.
+# Each step calls a Makefile target, so any failure reproduces locally with the same command.
+# Build, vulnerability scan, SBOM and publishing to GHCR are added in later steps of Phase 2.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege: the GITHUB_TOKEN can only read the repository. Jobs that need more ask for it.
+permissions:
+  contents: read
+
+# A new push to the same PR cancels the run in progress; runs on main always complete.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      # Actions are pinned to full commit SHAs (a tag can be moved to different code; a SHA cannot).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0             # the secrets scan reads the whole history
+          persist-credentials: false # later steps never need the token in .git/config
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+      - name: Format and vet
+        run: make fmt vet
+      - name: Lint (golangci-lint, hadolint, shellcheck)
+        run: make lint
+      - name: Secrets scan (full git history)
+        run: make secrets-scan
+
+  test:
+    name: test
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+      - name: Unit and integration tests with the race detector
+        run: make test-race

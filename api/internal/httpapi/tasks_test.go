@@ -22,8 +22,15 @@ func newAPI(t *testing.T, store TaskStore) *apiClient {
 	return &apiClient{t: t, url: newTestServer(t, testDeps(store)).URL}
 }
 
+// apiResponse is what tests need from a response. do() reads and closes the body itself, so it
+// returns no *http.Response whose body a caller could forget about.
+type apiResponse struct {
+	StatusCode int
+	Header     http.Header
+}
+
 // do sends a request and decodes a JSON response body into out (if non-nil).
-func (c *apiClient) do(method, path, body string, out any) *http.Response {
+func (c *apiClient) do(method, path, body string, out any) apiResponse {
 	c.t.Helper()
 	req, err := http.NewRequest(method, c.url+path, strings.NewReader(body))
 	if err != nil {
@@ -41,7 +48,7 @@ func (c *apiClient) do(method, path, body string, out any) *http.Response {
 			c.t.Fatalf("decode %s %s response %q: %v", method, path, raw, err)
 		}
 	}
-	return resp
+	return apiResponse{StatusCode: resp.StatusCode, Header: resp.Header}
 }
 
 func (c *apiClient) create(title string) task.Task {
@@ -53,10 +60,10 @@ func (c *apiClient) create(title string) task.Task {
 	return got
 }
 
-func wantStatus(t *testing.T, resp *http.Response, want int) {
+func wantStatus(t *testing.T, got, want int) {
 	t.Helper()
-	if resp.StatusCode != want {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, want)
+	if got != want {
+		t.Fatalf("status = %d, want %d", got, want)
 	}
 }
 
@@ -66,7 +73,7 @@ func TestCreateTask(t *testing.T) {
 	var got task.Task
 	resp := api.do("POST", "/api/v1/tasks", `{"title":"  Write ADR  ","description":"why k3d"}`, &got)
 
-	wantStatus(t, resp, http.StatusCreated)
+	wantStatus(t, resp.StatusCode, http.StatusCreated)
 	if loc := resp.Header.Get("Location"); loc != "/api/v1/tasks/"+got.ID {
 		t.Errorf("Location = %q, want /api/v1/tasks/%s", loc, got.ID)
 	}
@@ -95,7 +102,7 @@ func TestCreateTaskRejectsBadInput(t *testing.T) {
 			var got errorBody
 			resp := api.do("POST", "/api/v1/tasks", tc.body, &got)
 
-			wantStatus(t, resp, http.StatusBadRequest)
+			wantStatus(t, resp.StatusCode, http.StatusBadRequest)
 			if got.Code != tc.wantCode {
 				t.Errorf("code = %q, want %q (error: %s)", got.Code, tc.wantCode, got.Error)
 			}
@@ -111,19 +118,19 @@ func TestGetTask(t *testing.T) {
 	created := api.create("read me")
 
 	var got task.Task
-	wantStatus(t, api.do("GET", "/api/v1/tasks/"+created.ID, "", &got), http.StatusOK)
+	wantStatus(t, api.do("GET", "/api/v1/tasks/"+created.ID, "", &got).StatusCode, http.StatusOK)
 	if got.ID != created.ID || got.Title != "read me" {
 		t.Errorf("got %+v, want task %s", got, created.ID)
 	}
 
 	var notFound errorBody
-	wantStatus(t, api.do("GET", "/api/v1/tasks/00000000-0000-7000-8000-999999999999", "", &notFound), http.StatusNotFound)
+	wantStatus(t, api.do("GET", "/api/v1/tasks/00000000-0000-7000-8000-999999999999", "", &notFound).StatusCode, http.StatusNotFound)
 	if notFound.Code != "not_found" {
 		t.Errorf("code = %q, want not_found", notFound.Code)
 	}
 
 	var badID errorBody
-	wantStatus(t, api.do("GET", "/api/v1/tasks/not-a-uuid", "", &badID), http.StatusBadRequest)
+	wantStatus(t, api.do("GET", "/api/v1/tasks/not-a-uuid", "", &badID).StatusCode, http.StatusBadRequest)
 	if badID.Fields["id"] == "" {
 		t.Errorf("expected an id field error, got %+v", badID)
 	}
@@ -133,7 +140,7 @@ func TestListTasks(t *testing.T) {
 	api := newAPI(t, newFakeStore())
 
 	var empty listResponse
-	wantStatus(t, api.do("GET", "/api/v1/tasks", "", &empty), http.StatusOK)
+	wantStatus(t, api.do("GET", "/api/v1/tasks", "", &empty).StatusCode, http.StatusOK)
 	if empty.Items == nil || len(empty.Items) != 0 || empty.Limit != defaultLimit {
 		t.Errorf("empty list = %+v, want items [] and default limit", empty)
 	}
@@ -143,7 +150,7 @@ func TestListTasks(t *testing.T) {
 	}
 
 	var page listResponse
-	wantStatus(t, api.do("GET", "/api/v1/tasks?limit=2&offset=1", "", &page), http.StatusOK)
+	wantStatus(t, api.do("GET", "/api/v1/tasks?limit=2&offset=1", "", &page).StatusCode, http.StatusOK)
 	if len(page.Items) != 2 || page.Items[0].Title != "task 2" || page.Items[1].Title != "task 1" {
 		t.Errorf("page = %+v, want [task 2, task 1] (newest first, offset 1)", page.Items)
 	}
@@ -154,7 +161,7 @@ func TestListTasksRejectsBadPagination(t *testing.T) {
 	for _, q := range []string{"limit=0", "limit=101", "limit=abc", "offset=-1", "offset=x"} {
 		t.Run(q, func(t *testing.T) {
 			var got errorBody
-			wantStatus(t, api.do("GET", "/api/v1/tasks?"+q, "", &got), http.StatusBadRequest)
+			wantStatus(t, api.do("GET", "/api/v1/tasks?"+q, "", &got).StatusCode, http.StatusBadRequest)
 			if got.Code != "validation_failed" {
 				t.Errorf("code = %q, want validation_failed", got.Code)
 			}
@@ -167,18 +174,18 @@ func TestUpdateTask(t *testing.T) {
 	created := api.create("original")
 
 	var got task.Task
-	wantStatus(t, api.do("PATCH", "/api/v1/tasks/"+created.ID, `{"status":"in_progress"}`, &got), http.StatusOK)
+	wantStatus(t, api.do("PATCH", "/api/v1/tasks/"+created.ID, `{"status":"in_progress"}`, &got).StatusCode, http.StatusOK)
 	if got.Status != task.StatusInProgress || got.Title != "original" {
 		t.Errorf("got %+v, want status changed and title untouched", got)
 	}
 
 	var verr errorBody
-	wantStatus(t, api.do("PATCH", "/api/v1/tasks/"+created.ID, `{}`, &verr), http.StatusBadRequest)
+	wantStatus(t, api.do("PATCH", "/api/v1/tasks/"+created.ID, `{}`, &verr).StatusCode, http.StatusBadRequest)
 	if verr.Fields["body"] == "" {
 		t.Errorf("empty patch: expected a body error, got %+v", verr)
 	}
 
-	wantStatus(t, api.do("PATCH", "/api/v1/tasks/00000000-0000-7000-8000-999999999999", `{"title":"x"}`, nil), http.StatusNotFound)
+	wantStatus(t, api.do("PATCH", "/api/v1/tasks/00000000-0000-7000-8000-999999999999", `{"title":"x"}`, nil).StatusCode, http.StatusNotFound)
 }
 
 func TestDeleteTask(t *testing.T) {
@@ -186,10 +193,10 @@ func TestDeleteTask(t *testing.T) {
 	created := api.create("to delete")
 
 	resp := api.do("DELETE", "/api/v1/tasks/"+created.ID, "", nil)
-	wantStatus(t, resp, http.StatusNoContent)
+	wantStatus(t, resp.StatusCode, http.StatusNoContent)
 
-	wantStatus(t, api.do("GET", "/api/v1/tasks/"+created.ID, "", nil), http.StatusNotFound)
-	wantStatus(t, api.do("DELETE", "/api/v1/tasks/"+created.ID, "", nil), http.StatusNotFound)
+	wantStatus(t, api.do("GET", "/api/v1/tasks/"+created.ID, "", nil).StatusCode, http.StatusNotFound)
+	wantStatus(t, api.do("DELETE", "/api/v1/tasks/"+created.ID, "", nil).StatusCode, http.StatusNotFound)
 }
 
 func TestStoreFailureDoesNotLeakDetails(t *testing.T) {
@@ -204,7 +211,7 @@ func TestStoreFailureDoesNotLeakDetails(t *testing.T) {
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 
-	wantStatus(t, resp, http.StatusInternalServerError)
+	wantStatus(t, resp.StatusCode, http.StatusInternalServerError)
 	if strings.Contains(string(raw), "10.0.0.5") || strings.Contains(string(raw), "password") {
 		t.Errorf("response leaks internal error: %s", raw)
 	}
