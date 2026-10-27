@@ -21,7 +21,7 @@ ADR-0001 for why the code and platform are split).
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 0 | Repo skeleton, pinned tools, `make bootstrap` | Implemented, Tested (evidence: `taskflow-platform/docs/test-results/phase-0-workstation.md`) |
-| 1 | API + frontend + Postgres via docker compose, migrations, tests | In progress (steps 1.1-1.6 done; 1.7 smoke test and evidence pending) |
+| 1 | API + frontend + Postgres via docker compose, migrations, tests | Implemented, Tested (evidence: `taskflow-platform/docs/test-results/phase-1-app-in-containers.md`) |
 | 2 | App CI pipeline | Planned |
 
 ## Prerequisites
@@ -52,6 +52,8 @@ make up              # creates .env if missing; postgres -> migrate -> api -> fr
 make ps              # `migrate` should show "Exited (0)"
 make migrate-status  # applied / pending migrations
 make psql            # SQL shell inside the postgres container
+make smoke           # 20 end-to-end checks through the frontend (BASE_URL=... for other environments)
+make persistence-test  # data survives a postgres restart and compose down/up (restarts the stack)
 make down            # stop; the pgdata volume (your data) is kept
 ```
 

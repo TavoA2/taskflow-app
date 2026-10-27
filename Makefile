@@ -5,11 +5,12 @@ SHELL := /bin/bash
 VERSION   := $(shell git describe --always --dirty --abbrev=12 2>/dev/null || echo dev)
 API_IMAGE := taskflow-api:$(VERSION)
 COMPOSE   := API_TAG=$(VERSION) docker compose
+BASE_URL  ?= http://127.0.0.1:8080
 
-.PHONY: help bootstrap fmt vet test test-integration api-image env up down ps logs migrate-status psql
+.PHONY: help bootstrap fmt vet test test-integration api-image env up down ps logs migrate-status psql smoke persistence-test
 
 help: ## List available targets
-	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 bootstrap: ## Verify workstation tools against .tool-versions (read-only)
 	@./scripts/bootstrap.sh
@@ -50,3 +51,9 @@ migrate-status: ## Show applied/pending migrations
 
 psql: ## Open psql inside the postgres container
 	$(COMPOSE) exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
+
+smoke: ## Smoke-test a running stack through the frontend (BASE_URL=http://127.0.0.1:8080)
+	./scripts/smoke-test.sh $(BASE_URL)
+
+persistence-test: ## Prove data survives a postgres restart and compose down/up (restarts the stack)
+	API_TAG=$(VERSION) ./scripts/persistence-test.sh $(BASE_URL)
