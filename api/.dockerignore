@@ -1,0 +1,7 @@
+# Keep the build context to what the build needs (faster builds, no accidental secrets in layers).
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+**/*_test.go

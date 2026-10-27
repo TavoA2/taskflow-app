@@ -11,7 +11,7 @@ ADR-0001 for why the code and platform are split).
 
 | Component | Description | Status |
 |-----------|-------------|--------|
-| API | Go REST service: task CRUD, `/healthz`, `/readyz`, `/metrics` | Planned (Phase 1) |
+| API | Go REST service: task CRUD, `/healthz`, `/readyz`, `/metrics` | `/healthz`, graceful shutdown and image Implemented + Tested (step 1.1); rest Planned |
 | Frontend | Static site served by nginx | Planned (Phase 1) |
 | Database | PostgreSQL with versioned migrations | Planned (Phase 1) |
 | App CI | Lint, test, build, Trivy scan + SBOM, push to GHCR tagged by commit SHA | Planned (Phase 2) |
@@ -39,4 +39,21 @@ Windows 11 + WSL2 (Ubuntu) + Docker Desktop with WSL integration. Work inside `~
 ```bash
 make help        # list targets
 make bootstrap   # verify the workstation; exit code 0 = READY
+make fmt vet     # formatting and static analysis
+make test        # unit tests
+make api-image   # build taskflow-api:<git sha>[-dirty]
 ```
+
+## API configuration
+
+All configuration comes from environment variables.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `HTTP_ADDR` | `:8080` | Listen address |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `DRAIN_DELAY` | `5s` | Time to keep serving after SIGTERM while traffic is moved away |
+| `SHUTDOWN_TIMEOUT` | `15s` | Time allowed for in-flight requests after draining |
+
+`DRAIN_DELAY + SHUTDOWN_TIMEOUT` must stay below the orchestrator's grace period
+(Kubernetes `terminationGracePeriodSeconds`, default 30s; compose `stop_grace_period`, default 10s).
