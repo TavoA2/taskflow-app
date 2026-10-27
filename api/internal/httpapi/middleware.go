@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -102,7 +103,7 @@ func recoverer(next http.Handler, logger *slog.Logger) http.Handler {
 			if v == nil {
 				return
 			}
-			if v == http.ErrAbortHandler { // deliberate abort: let net/http handle it
+			if err, ok := v.(error); ok && errors.Is(err, http.ErrAbortHandler) { // deliberate abort: let net/http handle it
 				panic(v)
 			}
 			logger.Error("panic serving request", "request_id", RequestID(r.Context()),
@@ -120,8 +121,9 @@ func validRequestID(id string) bool {
 		return false
 	}
 	for i := 0; i < len(id); i++ {
-		c := id[i]
-		if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '-' || c == '_' || c == '.') {
+		switch c := id[i]; {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '-', c == '_', c == '.':
+		default:
 			return false
 		}
 	}

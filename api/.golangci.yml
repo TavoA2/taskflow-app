@@ -1,0 +1,50 @@
+# golangci-lint v2 configuration. Run with `make lint` (same pinned version locally and in CI).
+version: "2"
+
+run:
+  # Lint integration-tagged test files too.
+  build-tags: [integration]
+  timeout: 5m
+
+linters:
+  # standard = errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    - bodyclose      # HTTP response bodies are closed
+    - errorlint      # errors are compared with errors.Is/As, wrapped with %w
+    - gosec          # security issues (weak crypto, injection, unsafe file perms...)
+    - misspell
+    - noctx          # outgoing HTTP requests and queries carry a context
+    - nolintlint     # //nolint directives are specific and justified
+    - unconvert      # unnecessary type conversions
+    - usestdlibvars  # http.MethodGet instead of "GET", etc.
+  settings:
+    gosec:
+      excludes:
+        # G104 (unhandled errors) duplicates errcheck; errcheck is the single source for that rule,
+        # with the std-error-handling exclusions below.
+        - G104
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    presets:
+      # Unchecked errors from Close/Flush/print-style calls: idiomatic in Go for read paths, where a
+      # failed Close is not actionable. Writes that must be durable check their errors explicitly.
+      - std-error-handling
+    rules:
+      # Tests call httptest servers with plain http.Get on purpose; a context adds nothing there.
+      - path: _test\.go
+        linters: [noctx]
+      # Test fixtures contain fake connection URLs such as postgres://u:p@db/x, not credentials.
+      - path: _test\.go
+        linters: [gosec]
+        text: G101
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes: [github.com/TavoA2/taskflow-app]

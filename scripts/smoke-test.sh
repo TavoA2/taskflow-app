@@ -46,7 +46,7 @@ check "create returns a Location header"      "$(tr -d '\r' </tmp/smoke-headers.
 rm -f /tmp/smoke-headers.$$
 check "created task has default status todo"  "$(jq -r .status <<<"$resp")" todo
 check "get returns the created task"          "$(curl -s --max-time 10 "$API/$task_id" | jq -r .title)" "$marker"
-check "patch status to done"                  "$(curl -s --max-time 10 -X PATCH -H 'Content-Type: application/json' -d '{"status":"done"}' "$API/$task_id" | jq -r .status)" done
+check "patch status to done"                  "$(curl -s --max-time 10 -X PATCH -H 'Content-Type: application/json' -d '{"status":"done"}' "$API/$task_id" | jq -r .status)" "done"
 check "invalid input returns 400"             "$(status -X POST -H 'Content-Type: application/json' -d '{"title":""}' "$API")" 400
 check "unknown task returns 404"              "$(status "$API/00000000-0000-7000-8000-000000000000")" 404
 rid="smoke-rid-$RANDOM"

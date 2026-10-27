@@ -1,5 +1,7 @@
 # taskflow-app
 
+[![ci](https://github.com/TavoA2/taskflow-app/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TavoA2/taskflow-app/actions/workflows/ci.yml)
+
 Application repository for **TaskFlow**: a deliberately simple task/request manager used to exercise
 deployment, persistence, monitoring and recovery on Kubernetes.
 
@@ -14,7 +16,7 @@ ADR-0001 for why the code and platform are split).
 | API | Go REST service: task CRUD, `/healthz`, `/readyz`, `/metrics` | Implemented + Tested (steps 1.1-1.4) |
 | Frontend | Static HTML/CSS/JS served by nginx (non-root), reverse proxy for `/api/` only | Implemented + Tested (step 1.6) |
 | Database | PostgreSQL 18 with goose migrations run as a one-shot `migrate` step | Implemented + Tested (step 1.2) |
-| App CI | Lint, test, build, Trivy scan + SBOM, push to GHCR tagged by commit SHA | Planned (Phase 2) |
+| App CI | Lint, test, build, Trivy scan + SBOM, push to GHCR tagged by commit SHA | Lint + tests: Implemented (step 2.3); build, scan, SBOM, publish: Planned |
 
 ## Status
 
@@ -40,8 +42,11 @@ Windows 11 + WSL2 (Ubuntu) + Docker Desktop with WSL integration. Work inside `~
 make help        # list targets
 make bootstrap   # verify the workstation; exit code 0 = READY
 make fmt vet     # formatting and static analysis
+make lint        # golangci-lint, hadolint, shellcheck (pinned container images, same as CI)
+make secrets-scan  # gitleaks over the full git history
 make test        # unit tests (fast, no Docker)
 make test-integration  # unit + integration tests against a real PostgreSQL container (needs Docker)
+make test-race   # same with the race detector (needs a C compiler; this is what CI runs)
 make api-image   # build taskflow-api:<git sha>[-dirty]
 ```
 

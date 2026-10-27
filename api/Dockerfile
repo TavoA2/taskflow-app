@@ -16,10 +16,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/taskflow-api ./cmd/taskflow-api
 
-# Runtime: no shell, no package manager, CA certs and tzdata only; runs as UID 65532.
+# Runtime: no shell, no package manager, CA certs and tzdata only.
 FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/taskflow-api /taskflow-api
-USER nonroot:nonroot
+# Numeric UID/GID of distroless "nonroot": Kubernetes runAsNonRoot can only verify a numeric user.
+USER 65532:65532
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 CMD ["/taskflow-api", "healthcheck"]
 ENTRYPOINT ["/taskflow-api"]

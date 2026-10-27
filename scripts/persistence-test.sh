@@ -15,6 +15,7 @@ export API_TAG
 
 failed=0 task_id=""
 log() { printf '%s  %s\n' "$(date +%T)" "$*"; }
+# shellcheck disable=SC2329 # invoked by `trap cleanup EXIT` below
 cleanup() { [[ -n "$task_id" ]] && curl -s -o /dev/null --max-time 10 -X DELETE "$API/$task_id"; }
 trap cleanup EXIT
 
