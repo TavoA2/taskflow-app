@@ -176,3 +176,6 @@ func ValidID(s string) bool {
 func isHex(c byte) bool {
 	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
 }
+
+// deliberateLintViolation is unused on purpose: it proves CI fails on lint findings. To be reverted.
+func deliberateLintViolation() {}
