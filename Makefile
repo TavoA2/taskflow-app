@@ -17,6 +17,7 @@ OCI_LABELS := --label org.opencontainers.image.source=https://github.com/TavoA2/
               --label org.opencontainers.image.created=$(shell git log -1 --format=%cI 2>/dev/null) \
               --label org.opencontainers.image.licenses=MIT
 BASE_URL  ?= http://127.0.0.1:8080
+GITHUB_REPO := TavoA2/taskflow-app
 # Linters run from pinned container images, so local runs and CI use exactly the same versions.
 GITLEAKS_IMAGE   := ghcr.io/gitleaks/gitleaks:v8.30.1
 GOLANGCI_IMAGE   := golangci/golangci-lint:v2.15.0
@@ -40,7 +41,7 @@ GO_CACHES := -e GOPATH=/tmp/gopath -e GOMODCACHE=/tmp/gomodcache -v "$$(go env G
              -e GOCACHE=/tmp/gocache -v "$$(go env GOCACHE)":/tmp/gocache \
              -e GOLANGCI_LINT_CACHE=/tmp/gocache/golangci-lint -e HOME=/tmp
 
-.PHONY: help bootstrap fmt vet lint test test-race test-integration images image-archives vulncheck scan sbom env up down ps logs migrate-status psql smoke persistence-test secrets-scan
+.PHONY: help bootstrap ruleset ruleset-check fmt vet lint test test-race test-integration images image-archives vulncheck scan sbom env up down ps logs migrate-status psql smoke persistence-test secrets-scan
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -57,11 +58,22 @@ fmt: ## Fail if any Go file is not gofmt-formatted
 vet: ## Run go vet static analysis (including integration-tagged files)
 	cd api && go vet ./... && go vet -tags integration ./...
 
-lint: ## golangci-lint (Go), hadolint (Dockerfiles), shellcheck (scripts), actionlint (workflows)
+lint: ## golangci-lint, hadolint, shellcheck, actionlint, and consistency of pinned images
 	docker run --rm -u $$(id -u):$$(id -g) $(GO_CACHES) -v "$(CURDIR)":/src -w /src/api $(GOLANGCI_IMAGE) golangci-lint run ./...
 	docker run --rm -v "$(CURDIR)":/src:ro -w /src $(HADOLINT_IMAGE) hadolint api/Dockerfile frontend/Dockerfile
 	docker run --rm -v "$(CURDIR)":/src:ro -w /src $(SHELLCHECK_IMAGE) scripts/*.sh
 	docker run --rm -v "$(CURDIR)":/src:ro -w /src $(ACTIONLINT_IMAGE) -no-color
+	./scripts/check-pins.sh
+	@# Scripts must be committed as executable (mode 100755); editors on other filesystems can drop the bit.
+	@bad=$$(git ls-files -s 'scripts/*.sh' | awk '$$1 != "100755" {print $$4}'); \
+	  if [ -n "$$bad" ]; then echo "not executable in git (git update-index --chmod=+x): $$bad"; exit 1; fi; \
+	  echo "scripts executable in git: OK"
+
+ruleset: ## Create or update the main-branch ruleset on GitHub from .github/rulesets/main.json (admin)
+	./scripts/apply-ruleset.sh $(GITHUB_REPO) .github/rulesets/main.json
+
+ruleset-check: ## Fail if the live ruleset on GitHub differs from .github/rulesets/main.json
+	./scripts/apply-ruleset.sh $(GITHUB_REPO) .github/rulesets/main.json --check
 
 test: ## Run unit tests (fast, no Docker)
 	cd api && go test -count=1 ./...
