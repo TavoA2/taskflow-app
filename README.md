@@ -24,7 +24,7 @@ ADR-0001 for why the code and platform are split).
 |-------|-------|--------|
 | 0 | Repo skeleton, pinned tools, `make bootstrap` | Implemented, Tested (evidence: `taskflow-platform/docs/test-results/phase-0-workstation.md`) |
 | 1 | API + frontend + Postgres via docker compose, migrations, tests | Implemented, Tested (evidence: `taskflow-platform/docs/test-results/phase-1-app-in-containers.md`) |
-| 2 | App CI pipeline | Planned |
+| 2 | App CI pipeline | Implemented, Tested (evidence: `taskflow-platform/docs/test-results/phase-2-app-ci.md`) |
 
 ## Prerequisites
 
