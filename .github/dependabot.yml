@@ -32,6 +32,12 @@ updates:
     groups:
       base-images-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # nginx uses odd minor versions (1.31, 1.33...) for its mainline branch and even ones for stable;
+      # we follow stable. Patch and digest updates of the current branch still arrive. Moving to the next
+      # stable minor (e.g. 1.32) is a deliberate manual change, not an automated one.
+      - dependency-name: nginxinc/nginx-unprivileged
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: docker-compose
     directory: /
